@@ -1,0 +1,289 @@
+---
+title: 'Tiny Project: Exploratory Data Analysis of Car Fuel Efficiency'
+author: "Shreya Joshi"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    theme: cosmo
+    df_print: paged
+    number_sections: true
+  pdf_document:
+    toc: true
+    toc_depth: '3'
+subtitle: An Analysis of the Motor Trend Car Road Tests (mtcars) Dataset
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Introduction
+
+This project explores the **`mtcars`** dataset, which was extracted from the
+1974 *Motor Trend* US magazine. It contains fuel consumption and 10 aspects
+of automobile design and performance for 32 automobiles (1973–74 models).
+
+**Objective:** To understand which factors (engine size, weight, horsepower,
+number of cylinders, etc.) are most strongly associated with a car's fuel
+efficiency, measured in miles per gallon (mpg).
+
+The report follows a complete data analysis pipeline:
+
+1. Importing the data
+2. Cleaning and preprocessing
+3. Statistical exploration
+4. Visualization
+5. Interpretation and conclusions
+
+---
+
+# Loading Required Packages
+
+We use `ggplot2` for visualization and `dplyr` for data manipulation. Both
+are widely used tidyverse packages for data analysis in R.
+
+```{r libraries}
+# Install packages only if they are not already installed
+packages <- c("ggplot2", "dplyr", "corrplot")
+new_packages <- packages[!(packages %in% installed.packages()[, "Package"])]
+if (length(new_packages) > 0) install.packages(new_packages)
+
+library(ggplot2)   # for creating graphs and plots
+library(dplyr)     # for data manipulation (filter, group_by, summarise, etc.)
+library(corrplot)  # for correlation matrix visualization
+```
+
+**Code explanation:** We first check which of the required packages are
+already installed and only install the ones that are missing. This avoids
+reinstalling packages unnecessarily every time the report is knit. `library()`
+then loads each package into the current R session so its functions become
+available.
+
+---
+
+# Data Importing
+
+Although `mtcars` is a dataset built into R, we simulate a **real-world
+import workflow**: we first export it as a `.csv` file (as if it came from
+an external source, such as a database or survey export) and then re-import
+it using `read.csv()`, exactly as you would with any external dataset.
+
+```{r import}
+# Step 1: Export the built-in mtcars dataset to a CSV file (simulating an
+# external data source, e.g. downloaded from a database)
+data(mtcars)
+write.csv(mtcars, "mtcars_data.csv", row.names = TRUE)
+
+# Step 2: Import the CSV file back into R, as we would with any raw dataset
+car_data <- read.csv("mtcars_data.csv", row.names = 1, stringsAsFactors = FALSE)
+
+# Preview the imported data
+head(car_data)
+```
+
+**Code explanation:**
+
+* `write.csv()` writes the data frame to a `.csv` file. `row.names = TRUE`
+  keeps the car names as the first column.
+* `read.csv()` reads the CSV back into R as a data frame. `row.names = 1`
+  tells R to treat the first column (car names) as row labels rather than a
+  regular data column.
+* `head()` displays the first six rows so we can visually confirm the import
+  worked correctly.
+
+---
+
+# Data Preprocessing and Cleaning
+
+## Inspecting the Structure
+
+```{r structure}
+str(car_data)
+dim(car_data)
+```
+
+**Interpretation:** The dataset has 32 observations (cars) and 11 variables,
+all currently stored as numeric. Several of these (e.g. `cyl`, `vs`, `am`,
+`gear`, `carb`) are actually **categorical** variables encoded as numbers, so
+they need to be converted to factors for accurate analysis.
+
+## Checking for Missing Values
+
+```{r missing}
+colSums(is.na(car_data))
+```
+
+**Interpretation:** There are no missing values in any column, so no
+imputation or row removal is necessary. This is common with this dataset but
+is always an essential check before analysis.
+
+## Converting Variables to Proper Types
+
+```{r cleaning}
+car_data_clean <- car_data %>%
+  mutate(
+    cyl  = factor(cyl, levels = c(4, 6, 8), labels = c("4-cyl", "6-cyl", "8-cyl")),
+    vs   = factor(vs, levels = c(0, 1), labels = c("V-shaped", "Straight")),
+    am   = factor(am, levels = c(0, 1), labels = c("Automatic", "Manual")),
+    gear = factor(gear),
+    carb = factor(carb)
+  )
+
+# Add car names as an explicit column for easier plotting later
+car_data_clean$car_name <- rownames(car_data_clean)
+
+head(car_data_clean)
+```
+
+**Code explanation:**
+
+* `mutate()` (from `dplyr`) creates or transforms columns.
+* `factor()` converts numeric codes into labeled categorical variables — for
+  example, `cyl` becomes "4-cyl", "6-cyl", or "8-cyl" instead of just 4, 6, 8.
+  This makes plots and summaries far easier to interpret.
+* We also extract the row names (car models) into their own column, since
+  `ggplot2` works more easily with data stored in columns than in row names.
+
+---
+
+# Data Analysis and Statistical Exploration
+
+## Summary Statistics
+
+```{r summary}
+summary(car_data_clean[, c("mpg", "hp", "wt", "disp", "qsec")])
+```
+
+**Interpretation:** The average fuel efficiency across all cars is around
+20 mpg, ranging from about 10.4 to 33.9 mpg. Horsepower (`hp`) and weight
+(`wt`) both show wide variation, hinting that they may explain differences
+in mpg.
+
+## Average MPG by Number of Cylinders
+
+```{r group-summary}
+mpg_by_cyl <- car_data_clean %>%
+  group_by(cyl) %>%
+  summarise(
+    avg_mpg = mean(mpg),
+    avg_hp  = mean(hp),
+    count   = n()
+  )
+
+mpg_by_cyl
+```
+
+**Interpretation:** Cars with fewer cylinders (4-cyl) have noticeably higher
+average mpg than those with 8 cylinders, while horsepower shows the opposite
+pattern — more cylinders generally means more power but lower fuel economy.
+
+## Correlation Analysis
+
+```{r correlation}
+numeric_vars <- car_data_clean %>% select(mpg, hp, wt, disp, qsec, drat)
+cor_matrix <- cor(numeric_vars)
+round(cor_matrix, 2)
+```
+
+**Interpretation:** `mpg` is strongly **negatively correlated** with weight
+(`wt`) and displacement (`disp`), and moderately negatively correlated with
+horsepower (`hp`). This suggests heavier, higher-displacement cars tend to
+be less fuel-efficient.
+
+---
+
+# Graphs and Plots
+
+## Distribution of MPG
+
+```{r hist-mpg}
+ggplot(car_data_clean, aes(x = mpg)) +
+  geom_histogram(binwidth = 2, fill = "steelblue", color = "white") +
+  labs(title = "Distribution of Fuel Efficiency (MPG)",
+       x = "Miles per Gallon", y = "Number of Cars") +
+  theme_minimal()
+```
+
+**Interpretation:** Most cars cluster between 15 and 22 mpg, with a smaller
+number of highly efficient cars above 25 mpg.
+
+## MPG vs Weight, Colored by Cylinder Count
+
+```{r scatter-mpg-wt}
+ggplot(car_data_clean, aes(x = wt, y = mpg, color = cyl)) +
+  geom_point(size = 3) +
+  geom_smooth(method = "lm", se = FALSE, color = "black", linetype = "dashed") +
+  labs(title = "Fuel Efficiency vs. Weight",
+       x = "Weight (1000 lbs)", y = "Miles per Gallon", color = "Cylinders") +
+  theme_minimal()
+```
+
+**Interpretation:** There is a clear downward trend — as weight increases,
+mpg decreases. Cars with 8 cylinders also tend to be heavier and cluster in
+the lower-mpg region, reinforcing the correlation seen earlier.
+
+## MPG by Cylinder Count (Boxplot)
+
+```{r boxplot-mpg-cyl}
+ggplot(car_data_clean, aes(x = cyl, y = mpg, fill = cyl)) +
+  geom_boxplot() +
+  labs(title = "Fuel Efficiency by Number of Cylinders",
+       x = "Cylinders", y = "Miles per Gallon") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+**Interpretation:** The boxplot confirms that median mpg drops steadily as
+cylinder count increases, with relatively little overlap between the
+4-cylinder and 8-cylinder groups.
+
+## Correlation Heatmap
+
+```{r corr-heatmap}
+corrplot(cor_matrix, method = "color", type = "upper",
+         addCoef.col = "black", tl.col = "black", tl.srt = 45,
+         title = "Correlation Between Key Numeric Variables",
+         mar = c(0, 0, 2, 0))
+```
+
+**Interpretation:** The heatmap visually confirms strong negative
+correlations between `mpg` and both `wt` and `disp`, and a strong positive
+correlation between `wt` and `disp` themselves (heavier cars tend to have
+larger engines).
+
+---
+
+# Findings and Conclusion
+
+Based on the exploratory analysis of the `mtcars` dataset:
+
+* **Weight is the strongest predictor of poor fuel efficiency** — heavier
+  cars consistently get fewer miles per gallon.
+* **Cylinder count matters**: 4-cylinder cars average substantially higher
+  mpg than 6- or 8-cylinder cars, largely because they are lighter and less
+  powerful.
+* **Horsepower and displacement** are both negatively associated with mpg,
+  though weight remains the dominant factor.
+* Cars optimized for fuel economy in this dataset tend to be lighter,
+  smaller-engine, 4-cylinder vehicles.
+
+**Conclusion:** This project demonstrates a complete R data analysis
+workflow — from importing raw data, cleaning and transforming variables,
+exploring statistical relationships, to visualizing and interpreting
+results. The analysis confirms that vehicle weight and engine size are the
+primary determinants of fuel efficiency in this 1974 dataset, a pattern that
+still holds broadly true for vehicles today.
+
+---
+
+# Session Info
+
+```{r session-info}
+sessionInfo()
+```
+
+*(Including `sessionInfo()` is good practice — it records the R version and
+package versions used, which helps with reproducibility.)*
